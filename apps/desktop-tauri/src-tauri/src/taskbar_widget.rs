@@ -58,6 +58,8 @@ struct WidgetModel {
     providers: Vec<ProviderReadout>,
     dark_text: bool,
     open_on_hover: bool,
+    /// Requested taskbar text scale. Paint clamps this to the client height.
+    text_scale_percent: u16,
 }
 
 /// Whether moving the strip to `next` has to repaint it in full.
@@ -572,10 +574,107 @@ fn taskbar_remains_selected(
     all_monitors || prepared_taskbars.contains(&existing_taskbar)
 }
 
+/// Tile and type sizes at 100%. Higher text scales multiply these in the
+/// taskbar's existing physical-pixel space. Do not apply a second DPI factor:
+/// each monitor's `TaskbarLayout` bounds are already the pixels the widget
+/// is positioned in.
+const TASKBAR_TILE_DESIRED_WIDTH: i32 = 104;
+const TASKBAR_TILE_MINIMUM_WIDTH: i32 = 72;
+const TASKBAR_PRIMARY_FONT_PX: i32 = 14;
+const TASKBAR_DETAIL_FONT_PX: i32 = 12;
+const TASKBAR_PRIMARY_TOP_OFFSET: i32 = 16;
+const TASKBAR_DETAIL_TOP_OFFSET: i32 = 1;
+const TASKBAR_ICON_CENTER_OFFSET: i32 = 7;
+const TASKBAR_ICON_TEXT_GAP: i32 = 5;
+const TASKBAR_SEPARATOR_HALF: i32 = 13;
+const TASKBAR_DETAIL_GUTTER: i32 = 4;
+const TASKBAR_TEXT_VERTICAL_PADDING: i32 = 2;
+
+struct TaskbarTextMetrics {
+    percent: u16,
+    primary_font_px: i32,
+    detail_font_px: i32,
+    primary_top_offset: i32,
+    detail_top_offset: i32,
+    icon_center_offset: i32,
+    icon_text_gap: i32,
+    separator_half: i32,
+    desired_tile_width: i32,
+    minimum_tile_width: i32,
+    detail_gutter: i32,
+}
+
+fn scale_px(base: i32, percent: u16) -> i32 {
+    base.saturating_mul(i32::from(percent)).saturating_add(50) / 100
+}
+
+fn taskbar_text_metrics(percent: u16) -> TaskbarTextMetrics {
+    let percent = codexbar::settings::clamp_taskbar_text_scale_percent(percent);
+    TaskbarTextMetrics {
+        percent,
+        primary_font_px: scale_px(TASKBAR_PRIMARY_FONT_PX, percent),
+        detail_font_px: scale_px(TASKBAR_DETAIL_FONT_PX, percent),
+        primary_top_offset: scale_px(TASKBAR_PRIMARY_TOP_OFFSET, percent),
+        detail_top_offset: scale_px(TASKBAR_DETAIL_TOP_OFFSET, percent),
+        icon_center_offset: scale_px(TASKBAR_ICON_CENTER_OFFSET, percent),
+        icon_text_gap: scale_px(TASKBAR_ICON_TEXT_GAP, percent),
+        separator_half: scale_px(TASKBAR_SEPARATOR_HALF, percent),
+        desired_tile_width: scale_px(TASKBAR_TILE_DESIRED_WIDTH, percent),
+        minimum_tile_width: scale_px(TASKBAR_TILE_MINIMUM_WIDTH, percent),
+        detail_gutter: scale_px(TASKBAR_DETAIL_GUTTER, percent),
+    }
+}
+
+fn taskbar_text_fits(metrics: &TaskbarTextMetrics, taskbar_height: i32) -> bool {
+    if taskbar_height <= 0 {
+        return false;
+    }
+    let middle = taskbar_height / 2;
+    let top = middle - metrics.primary_top_offset;
+    let bottom = middle + metrics.detail_top_offset + metrics.detail_font_px;
+    top >= TASKBAR_TEXT_VERTICAL_PADDING
+        && bottom <= taskbar_height - TASKBAR_TEXT_VERTICAL_PADDING
+}
+
+/// Largest stored scale that keeps both text lines inside `taskbar_height`.
+///
+/// The requested preference is left unchanged. A short taskbar uses a smaller
+/// effective scale so percentages and reset times stay inside the band.
+fn effective_taskbar_text_scale_percent(requested: u16, taskbar_height: i32) -> u16 {
+    let requested = codexbar::settings::clamp_taskbar_text_scale_percent(requested);
+    if taskbar_text_fits(&taskbar_text_metrics(requested), taskbar_height) {
+        return requested;
+    }
+    let mut percent = requested;
+    while percent > 100 {
+        percent -= 1;
+        if taskbar_text_fits(&taskbar_text_metrics(percent), taskbar_height) {
+            return percent;
+        }
+    }
+    100
+}
+
+fn taskbar_text_metrics_for_band(requested: u16, taskbar_height: i32) -> TaskbarTextMetrics {
+    taskbar_text_metrics(effective_taskbar_text_scale_percent(
+        requested,
+        taskbar_height,
+    ))
+}
+
 fn taskbar_placements(
     layouts: &[TaskbarLayout],
     all_monitors: bool,
     provider_count: usize,
+) -> (Vec<isize>, Vec<isize>, Vec<(isize, ChildPlacement)>) {
+    taskbar_placements_with_text_scale(layouts, all_monitors, provider_count, 100)
+}
+
+fn taskbar_placements_with_text_scale(
+    layouts: &[TaskbarLayout],
+    all_monitors: bool,
+    provider_count: usize,
+    text_scale_percent: u16,
 ) -> (Vec<isize>, Vec<isize>, Vec<(isize, ChildPlacement)>) {
     let mut discovered = Vec::new();
     let mut rejected = Vec::new();
@@ -586,7 +685,12 @@ fn taskbar_placements(
         .filter(|layout| layout.window_handle != 0)
     {
         discovered.push(layout.window_handle);
-        match placement_outcome(layout, layout.landmarks, provider_count) {
+        match placement_outcome_with_text_scale(
+            layout,
+            layout.landmarks,
+            provider_count,
+            text_scale_percent,
+        ) {
             PlacementOutcome::Place(placement) => {
                 placements.push((layout.window_handle, placement));
             }
@@ -604,6 +708,24 @@ fn child_placement(
     provider_count: usize,
 ) -> Option<ChildPlacement> {
     match placement_outcome(layout, landmarks, provider_count) {
+        PlacementOutcome::Place(placement) => Some(placement),
+        PlacementOutcome::TransientLandmarks | PlacementOutcome::VerifiedNoFit => None,
+    }
+}
+
+#[cfg(test)]
+fn child_placement_at_scale(
+    layout: &TaskbarLayout,
+    landmarks: TaskbarLandmarks,
+    provider_count: usize,
+    text_scale_percent: u16,
+) -> Option<ChildPlacement> {
+    match placement_outcome_with_text_scale(
+        layout,
+        landmarks,
+        provider_count,
+        text_scale_percent,
+    ) {
         PlacementOutcome::Place(placement) => Some(placement),
         PlacementOutcome::TransientLandmarks | PlacementOutcome::VerifiedNoFit => None,
     }
@@ -649,6 +771,15 @@ fn placement_outcome(
     landmarks: TaskbarLandmarks,
     provider_count: usize,
 ) -> PlacementOutcome {
+    placement_outcome_with_text_scale(layout, landmarks, provider_count, 100)
+}
+
+fn placement_outcome_with_text_scale(
+    layout: &TaskbarLayout,
+    landmarks: TaskbarLandmarks,
+    provider_count: usize,
+    text_scale_percent: u16,
+) -> PlacementOutcome {
     if layout.bounds.width() < layout.bounds.height() || provider_count == 0 {
         return PlacementOutcome::VerifiedNoFit;
     }
@@ -689,11 +820,13 @@ fn placement_outcome(
     let Ok(provider_count) = i32::try_from(provider_count) else {
         return PlacementOutcome::VerifiedNoFit;
     };
+    let metrics = taskbar_text_metrics_for_band(text_scale_percent, layout.bounds.height());
     // Leave enough room for labels such as "Weekly · 5d 21h" while keeping
     // both lines centered on the same axis. Squeezing 3 providers into 276px
-    // put the final reset digits against the divider.
-    let desired_width = provider_count.saturating_mul(104);
-    let minimum_width = provider_count.saturating_mul(72);
+    // put the final reset digits against the divider. Wider text uses wider
+    // tiles; a gap that cannot hold the minimum still hides the strip.
+    let desired_width = provider_count.saturating_mul(metrics.desired_tile_width);
+    let minimum_width = provider_count.saturating_mul(metrics.minimum_tile_width);
 
     // UI Automation can expose Search, Task View, or pinned-app buttons in
     // either lane. Never cover one: use only a fully empty sub-gap and hide
@@ -1173,10 +1306,11 @@ mod windows_host {
             return Err(PrepareFailure::NoProviders);
         }
         let layouts = crate::floatbar::taskbar::discover_all();
-        let (_, rejected_taskbars, placements) = taskbar_placements(
+        let (_, rejected_taskbars, placements) = taskbar_placements_with_text_scale(
             &layouts,
             settings.taskbar_widget_all_monitors,
             model.providers.len(),
+            model.text_scale_percent,
         );
         let widgets = placements
             .into_iter()
@@ -1357,6 +1491,7 @@ mod windows_host {
             providers,
             dark_text,
             open_on_hover: settings.taskbar_widget_open_on_hover,
+            text_scale_percent: settings.taskbar_text_scale_percent,
         })
     }
 
@@ -1730,10 +1865,15 @@ mod windows_host {
         // Match Windows 11's compact taskbar typography. The Small optical cut
         // keeps counters and spacing legible at the compact sizes used by
         // Widgets (Weather), with a restrained medium/regular hierarchy.
+        // Font sizes and baselines scale with the user's text preference, then
+        // shrink again when this taskbar is too short to hold them.
+        let client_height = rect.bottom.saturating_sub(rect.top).max(1);
+        let metrics =
+            super::taskbar_text_metrics_for_band(model.text_scale_percent, client_height);
         let face = wide("Segoe UI Variable Small");
         let primary_font = unsafe {
             CreateFontW(
-                -14,
+                -metrics.primary_font_px,
                 0,
                 0,
                 0,
@@ -1751,7 +1891,7 @@ mod windows_host {
         };
         let detail_font = unsafe {
             CreateFontW(
-                -12,
+                -metrics.detail_font_px,
                 0,
                 0,
                 0,
@@ -1781,7 +1921,7 @@ mod windows_host {
             let item_left = i32::try_from(index).unwrap_or(0) * item_width;
             let color = provider_color(&provider.provider_id, model.dark_text);
             const ICON_WIDTH: i32 = 16;
-            const ICON_TEXT_GAP: i32 = 5;
+            let icon_text_gap = metrics.icon_text_gap;
             // Widest spelling that stays inside this tile. The strip paints
             // without clipping and `centered_content_x` pins overlong content to
             // the cell's left edge, so an unchecked "$1112.92" on a crowded
@@ -1789,7 +1929,7 @@ mod windows_host {
             let percent_label = provider.percent.map(|percent| format!("{percent}%"));
             let budget = item_width
                 .saturating_sub(ICON_WIDTH)
-                .saturating_sub(ICON_TEXT_GAP);
+                .saturating_sub(icon_text_gap);
             let mut best: Option<(Vec<u16>, i32)> = None;
             for candidate in [
                 provider.amount_label.as_deref(),
@@ -1823,7 +1963,7 @@ mod windows_host {
             }
             let (label, label_width) = best.expect("the em dash always yields a candidate");
             let primary_width = ICON_WIDTH
-                .saturating_add(ICON_TEXT_GAP)
+                .saturating_add(icon_text_gap)
                 .saturating_add(label_width);
             let primary_left = centered_content_x(item_left, item_width, primary_width);
             unsafe {
@@ -1831,7 +1971,7 @@ mod windows_host {
                     hdc,
                     &provider.provider_id,
                     primary_left + ICON_WIDTH / 2,
-                    middle - 7,
+                    middle - metrics.icon_center_offset,
                     color,
                 )
             };
@@ -1839,8 +1979,8 @@ mod windows_host {
                 SetTextColor(hdc, text_color);
                 TextOutW(
                     hdc,
-                    primary_left + ICON_WIDTH + ICON_TEXT_GAP,
-                    middle - 16,
+                    primary_left + ICON_WIDTH + icon_text_gap,
+                    middle - metrics.primary_top_offset,
                     label.as_ptr(),
                     label.len() as i32,
                 );
@@ -1853,7 +1993,7 @@ mod windows_host {
                 // Measure in the font the line is actually drawn in, not the
                 // headline one selected above.
                 SelectObject(hdc, detail_font);
-                let budget = item_width.saturating_sub(DETAIL_GUTTER);
+                let budget = item_width.saturating_sub(metrics.detail_gutter);
                 let chosen = fit_detail(&spellings, budget, |text| {
                     text_width(hdc, &wide_without_nul(text))
                 });
@@ -1863,7 +2003,7 @@ mod windows_host {
                 TextOutW(
                     hdc,
                     centered_content_x(item_left, item_width, detail_width),
-                    middle + 1,
+                    middle + metrics.detail_top_offset,
                     detail.as_ptr(),
                     detail.len() as i32,
                 );
@@ -1877,10 +2017,10 @@ mod windows_host {
                     MoveToEx(
                         hdc,
                         item_left + item_width - 1,
-                        middle - 13,
+                        middle - metrics.separator_half,
                         std::ptr::null_mut(),
                     );
-                    LineTo(hdc, item_left + item_width - 1, middle + 13);
+                    LineTo(hdc, item_left + item_width - 1, middle + metrics.separator_half);
                     SelectObject(hdc, old_pen);
                     DeleteObject(separator);
                 }
@@ -4288,5 +4428,175 @@ mod tests {
         assert!(should_report_waiting_landmarks(
             TRANSIENT_LANDMARKS_DEBOUNCE + 1
         ));
+    }
+
+    #[test]
+    fn taskbar_text_metrics_match_the_unscaled_strip() {
+        let metrics = taskbar_text_metrics(100);
+        assert_eq!(metrics.percent, 100);
+        assert_eq!(metrics.primary_font_px, 14);
+        assert_eq!(metrics.detail_font_px, 12);
+        assert_eq!(metrics.primary_top_offset, 16);
+        assert_eq!(metrics.detail_top_offset, 1);
+        assert_eq!(metrics.icon_center_offset, 7);
+        assert_eq!(metrics.icon_text_gap, 5);
+        assert_eq!(metrics.separator_half, 13);
+        assert_eq!(metrics.desired_tile_width, 104);
+        assert_eq!(metrics.minimum_tile_width, 72);
+        assert_eq!(metrics.detail_gutter, 4);
+    }
+
+    #[test]
+    fn taskbar_text_scale_doubles_type_and_tiles_at_200_percent() {
+        let metrics = taskbar_text_metrics(200);
+        assert_eq!(metrics.primary_font_px, 28);
+        assert_eq!(metrics.detail_font_px, 24);
+        assert_eq!(metrics.primary_top_offset, 32);
+        assert_eq!(metrics.detail_top_offset, 2);
+        assert_eq!(metrics.desired_tile_width, 208);
+        assert_eq!(metrics.minimum_tile_width, 144);
+        assert_eq!(metrics.detail_gutter, 8);
+    }
+
+    #[test]
+    fn short_taskbars_limit_effective_text_scale() {
+        assert_eq!(effective_taskbar_text_scale_percent(200, 120), 200);
+        let limited = effective_taskbar_text_scale_percent(200, 48);
+        assert!(limited < 200, "a 48px taskbar cannot hold 200% text");
+        assert!(limited >= 100);
+        assert!(taskbar_text_fits(&taskbar_text_metrics(limited), 48));
+        assert!(!taskbar_text_fits(
+            &taskbar_text_metrics(limited + 1),
+            48
+        ));
+        assert_eq!(effective_taskbar_text_scale_percent(100, 48), 100);
+        assert_eq!(effective_taskbar_text_scale_percent(100, 20), 100);
+        assert!(taskbar_text_metrics_for_band(200, 48).desired_tile_width < 208);
+    }
+
+    #[test]
+    fn scaled_detail_text_stays_off_the_separator() {
+        for percent in [100_u16, 125, 150, 175, 200] {
+            let metrics = taskbar_text_metrics(percent);
+            for tile in metrics.minimum_tile_width..=metrics.desired_tile_width {
+                let budget = tile - metrics.detail_gutter;
+                let separator = tile - 1;
+                for width in 1..=budget {
+                    let right_edge = centered_content_x(0, tile, width) + width;
+                    assert!(
+                        right_edge < separator,
+                        "percent {percent}, tile {tile}, content {width}: right edge {right_edge} \
+                         reaches separator at {separator}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn higher_text_scale_widens_tiles_without_covering_start() {
+        let taskbar = layout(
+            Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 120,
+            },
+            Vec::new(),
+        );
+        let landmarks = TaskbarLandmarks {
+            widgets: None,
+            start: Some(Rect {
+                left: 900,
+                top: 0,
+                right: 948,
+                bottom: 120,
+            }),
+            tray: Some(Rect {
+                left: 1800,
+                top: 0,
+                right: 1900,
+                bottom: 120,
+            }),
+        };
+
+        let at_100 = child_placement(&taskbar, landmarks, 2).expect("100% fits");
+        let at_200 =
+            child_placement_at_scale(&taskbar, landmarks, 2, 200).expect("200% fits a tall bar");
+
+        assert_eq!((at_100.width, at_100.y, at_100.height), (208, 0, 120));
+        assert_eq!((at_200.width, at_200.y, at_200.height), (416, 0, 120));
+        assert!(at_200.x >= 8);
+        assert!(
+            at_200.x + at_200.width <= 900 - 8,
+            "scaled strip must end before Start"
+        );
+    }
+
+    #[test]
+    fn text_scale_that_no_longer_fits_hides_instead_of_covering_controls() {
+        let taskbar = layout(
+            Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 120,
+            },
+            Vec::new(),
+        );
+        let landmarks = TaskbarLandmarks {
+            widgets: None,
+            start: Some(Rect {
+                left: 200,
+                top: 0,
+                right: 248,
+                bottom: 120,
+            }),
+            tray: Some(Rect {
+                left: 400,
+                top: 0,
+                right: 500,
+                bottom: 120,
+            }),
+        };
+
+        assert!(
+            child_placement(&taskbar, landmarks, 2).is_some(),
+            "100% still fits the lane left of Start"
+        );
+        assert!(
+            child_placement_at_scale(&taskbar, landmarks, 2, 200).is_none(),
+            "200% must hide rather than cover Start or the tray"
+        );
+    }
+
+    #[test]
+    fn a_short_taskbar_does_not_use_the_full_requested_tile_width() {
+        let taskbar = layout(
+            Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 48,
+            },
+            Vec::new(),
+        );
+        let landmarks = TaskbarLandmarks {
+            widgets: None,
+            start: Some(Rect {
+                left: 900,
+                top: 0,
+                right: 948,
+                bottom: 48,
+            }),
+            tray: None,
+        };
+        let placement = child_placement_at_scale(&taskbar, landmarks, 2, 200)
+            .expect("the height-limited scale still fits");
+        let unlimited = taskbar_text_metrics(200).desired_tile_width * 2;
+
+        assert!(placement.width < unlimited);
+        assert!(placement.x + placement.width <= 900 - 8);
+        assert_eq!(placement.height, 48);
     }
 }

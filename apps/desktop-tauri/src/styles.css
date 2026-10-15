@@ -6015,7 +6015,7 @@ html:has(.menu-surface--tray) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0;
-  justify-content: center;
+  justify-content: safe center;
   overflow-x: auto;
   scrollbar-width: none;
 }

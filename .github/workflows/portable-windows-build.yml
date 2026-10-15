@@ -1,0 +1,77 @@
+name: Portable Windows build
+
+# Manually builds the unsigned desktop executable. This is the same binary
+# `scripts/windows-release-build.ps1 -BuildOnly` writes as ceiling.exe, which
+# the signed release later copies to the portable asset. It does not sign,
+# package an installer, publish a release, or deploy.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: portable-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Build unsigned portable executable
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out selected ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.18.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Prepare build paths
+        shell: pwsh
+        run: |
+          $workRoot = Join-Path $env:RUNNER_TEMP "Ceiling-release"
+          "RELEASE_WORK_ROOT=$workRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build unsigned desktop executable
+        shell: pwsh
+        run: |
+          & .\scripts\windows-release-build.ps1 `
+            -Ref $env:GITHUB_SHA `
+            -RepoUrl "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" `
+            -WorkRoot $env:RELEASE_WORK_ROOT `
+            -BuildOnly
+
+      - name: Stage portable executable
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RELEASE_WORK_ROOT "cache\cargo-target\x86_64-pc-windows-msvc\release\ceiling.exe"
+          if (-not (Test-Path -LiteralPath $source)) {
+            throw "BuildOnly did not produce $source"
+          }
+          $staged = Join-Path $env:RUNNER_TEMP "Ceiling-portable.exe"
+          Copy-Item -LiteralPath $source -Destination $staged -Force
+          "PORTABLE_EXE=$staged" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload unsigned portable executable
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: Ceiling-windows-portable
+          path: ${{ runner.temp }}\Ceiling-portable.exe
+          if-no-files-found: error
+          retention-days: 14

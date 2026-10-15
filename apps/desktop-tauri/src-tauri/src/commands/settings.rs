@@ -50,6 +50,7 @@ pub struct SettingsUpdate {
     pub theme: Option<String>,
     pub window_scale_percent: Option<u16>,
     pub tray_scale_percent: Option<u16>,
+    pub taskbar_text_scale_percent: Option<u16>,
     pub powertoys_status_pipe_enabled: Option<bool>,
     pub claude_avoid_keychain_prompts: Option<bool>,
     pub codex_spark_usage_visible: Option<bool>,
@@ -201,6 +202,10 @@ impl SettingsUpdate {
         }
         if let Some(v) = self.tray_scale_percent {
             settings.tray_scale_percent = codexbar::settings::clamp_tray_scale_percent(v);
+        }
+        if let Some(v) = self.taskbar_text_scale_percent {
+            settings.taskbar_text_scale_percent =
+                codexbar::settings::clamp_taskbar_text_scale_percent(v);
         }
         if let Some(v) = self.switcher_shows_icons {
             settings.switcher_shows_icons = v;
@@ -407,6 +412,7 @@ pub async fn update_settings(
     app: tauri::AppHandle,
     patch: SettingsUpdate,
 ) -> Result<SettingsSnapshot, String> {
+    let refresh_taskbar_text_scale = patch.taskbar_text_scale_percent.is_some();
     let notify_float_bar = patch.notifies_float_bar();
     let refresh_provider_data = patch.refreshes_provider_data();
     let clear_local_usage_cache = patch.codex_custom_sessions_dirs.is_some();
@@ -442,6 +448,9 @@ pub async fn update_settings(
     }
 
     crate::floatbar::after_settings_saved(&app, &float_bar_patch, &settings, notify_float_bar);
+    if refresh_taskbar_text_scale {
+        crate::taskbar_widget::apply_state(&app, &settings);
+    }
     if rebuild_tray_menu {
         crate::tray_bridge::rebuild_tray_menu(&app);
     }
@@ -549,6 +558,33 @@ mod tests {
         }
         .apply_display_settings(&mut settings);
         assert_eq!(settings.tray_scale_percent, 100);
+    }
+
+    #[test]
+    fn apply_display_settings_clamps_taskbar_text_scale_percent() {
+        let mut settings = Settings::default();
+
+        SettingsUpdate {
+            taskbar_text_scale_percent: Some(400),
+            ..Default::default()
+        }
+        .apply_display_settings(&mut settings);
+        assert_eq!(settings.taskbar_text_scale_percent, 200);
+
+        SettingsUpdate {
+            taskbar_text_scale_percent: Some(50),
+            ..Default::default()
+        }
+        .apply_display_settings(&mut settings);
+        assert_eq!(settings.taskbar_text_scale_percent, 100);
+
+        SettingsUpdate {
+            window_scale_percent: Some(180),
+            ..Default::default()
+        }
+        .apply_display_settings(&mut settings);
+        assert_eq!(settings.window_scale_percent, 180);
+        assert_eq!(settings.taskbar_text_scale_percent, 100);
     }
 
     #[test]

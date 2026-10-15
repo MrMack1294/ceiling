@@ -151,6 +151,8 @@ pub(super) struct RawSettings {
     window_scale_percent: u16,
     #[serde(default = "default_tray_scale_percent")]
     tray_scale_percent: u16,
+    #[serde(default = "default_taskbar_text_scale_percent")]
+    taskbar_text_scale_percent: u16,
     #[serde(default)]
     powertoys_status_pipe_enabled: bool,
 
@@ -282,6 +284,7 @@ impl Default for RawSettings {
             theme: s.theme,
             window_scale_percent: s.window_scale_percent,
             tray_scale_percent: s.tray_scale_percent,
+            taskbar_text_scale_percent: s.taskbar_text_scale_percent,
             powertoys_status_pipe_enabled: s.powertoys_status_pipe_enabled,
             float_bar_enabled: Some(s.float_bar_enabled),
             taskbar_widget_enabled: Some(s.taskbar_widget_enabled),
@@ -660,6 +663,9 @@ impl From<RawSettings> for Settings {
             theme: raw.theme,
             window_scale_percent: clamp_window_scale_percent(raw.window_scale_percent),
             tray_scale_percent: clamp_tray_scale_percent(raw.tray_scale_percent),
+            taskbar_text_scale_percent: clamp_taskbar_text_scale_percent(
+                raw.taskbar_text_scale_percent,
+            ),
             powertoys_status_pipe_enabled: raw.powertoys_status_pipe_enabled,
             float_bar_enabled,
             taskbar_widget_enabled,

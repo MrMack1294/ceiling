@@ -412,8 +412,9 @@ pub struct Settings {
     #[serde(default)]
     pub theme: ThemePreference,
 
-    /// Main PopOut window display scale, in the inclusive range 100..=250.
+    /// Main PopOut and Settings window display scale, in the inclusive range 100..=250.
     /// 100 % is normal size; higher values enlarge the window content.
+    /// The Display slider offers 100..=200; stored values up to 250 still apply.
     #[serde(default = "default_window_scale_percent")]
     pub window_scale_percent: u16,
 
@@ -421,6 +422,11 @@ pub struct Settings {
     /// 100 % is normal size; higher values enlarge the flyout content.
     #[serde(default = "default_tray_scale_percent")]
     pub tray_scale_percent: u16,
+
+    /// Native taskbar percentage and reset text scale, in the inclusive range 100..=200.
+    /// Independent of the floating-bar size slider and the main window scale.
+    #[serde(default = "default_taskbar_text_scale_percent")]
+    pub taskbar_text_scale_percent: u16,
 
     /// Enable the local PowerToys Command Palette status pipe.
     #[serde(default)]
@@ -534,6 +540,14 @@ fn default_tray_scale_percent() -> u16 {
 }
 
 pub fn clamp_tray_scale_percent(value: u16) -> u16 {
+    value.clamp(100, 200)
+}
+
+fn default_taskbar_text_scale_percent() -> u16 {
+    100
+}
+
+pub fn clamp_taskbar_text_scale_percent(value: u16) -> u16 {
     value.clamp(100, 200)
 }
 
@@ -820,6 +834,7 @@ impl Default for Settings {
             theme: ThemePreference::default(), // Auto (follows prefers-color-scheme)
             window_scale_percent: default_window_scale_percent(),
             tray_scale_percent: default_tray_scale_percent(),
+            taskbar_text_scale_percent: default_taskbar_text_scale_percent(),
             powertoys_status_pipe_enabled: false,
             float_bar_enabled: false,
             taskbar_widget_enabled: true,

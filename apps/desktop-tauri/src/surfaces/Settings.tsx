@@ -7,6 +7,7 @@ import type {
   SettingsUpdate,
 } from "../types/bridge";
 import { useSettings } from "../hooks/useSettings";
+import { useWebviewWindowScale } from "../hooks/useWebviewWindowScale";
 import { useSurfaceTarget } from "../hooks/useSurfaceMode";
 import { useLocale } from "../hooks/useLocale";
 import { useTabListKeyboard } from "../hooks/useTabListKeyboard";
@@ -119,6 +120,7 @@ function isSettingsTab(value: string): value is SettingsTab {
 
 export default function Settings({ state, initialTab: propTab }: { state: BootstrapState; initialTab?: string }) {
   const { settings, saving, error, update } = useSettings(state.settings);
+  useWebviewWindowScale(settings.windowScalePercent);
   const { t } = useLocale();
   const shellTarget = useSurfaceTarget("settings");
   const initialTab: SettingsTab =

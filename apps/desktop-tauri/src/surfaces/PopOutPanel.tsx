@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BootstrapState, ProviderUsageSnapshot } from "../types/bridge";
 import { openSettingsWindow, quitApp as quitApplication } from "../lib/tauri";
 import {
@@ -8,6 +7,7 @@ import {
   representativeForProvider,
 } from "../lib/providerRow";
 import { useProviders } from "../hooks/useProviders";
+import { useWebviewWindowScale } from "../hooks/useWebviewWindowScale";
 import { useSettings } from "../hooks/useSettings";
 import { useUpdateState } from "../hooks/useUpdateState";
 import { useLocale } from "../hooks/useLocale";
@@ -139,12 +139,7 @@ export default function PopOutPanel({
     providerId ?? null,
   );
   const dashboardBodyRef = useRef<HTMLDivElement>(null);
-  const windowScale = useMemo(() => {
-    const scalePercent = Number(settings.windowScalePercent);
-    return (
-      Math.min(250, Math.max(100, Number.isFinite(scalePercent) ? scalePercent : 100)) / 100
-    );
-  }, [settings.windowScalePercent]);
+  useWebviewWindowScale(settings.windowScalePercent);
 
   // Live "updated N ago" clock for the status bar; re-renders every 30s so the
   // relative time stays current without a refresh.
@@ -162,18 +157,6 @@ export default function PopOutPanel({
     }
     return latest;
   }, [sorted]);
-
-  // Scale the dashboard via the webview's native zoom (like a browser's Ctrl-+):
-  // it reflows content at the real window width, so the side-by-side cards keep
-  // filling the window at any scale — unlike CSS `zoom`, which overflows. The
-  // main window is shared with the tray surface, so reset zoom to 1 on unmount.
-  useEffect(() => {
-    const webview = getCurrentWebviewWindow();
-    void webview.setZoom(windowScale).catch(() => {});
-    return () => {
-      void webview.setZoom(1).catch(() => {});
-    };
-  }, [windowScale]);
 
   useEffect(() => {
     setSelectedProviderId(providerId ?? null);

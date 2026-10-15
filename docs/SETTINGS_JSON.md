@@ -57,8 +57,9 @@ fields marked safe, but Ceiling may overwrite the file when the app exits.
 | `install_updates_on_quit` | boolean | `false` | Install pending updates when quitting. Safe to edit. |
 | `ui_language` | string | `"english"` | `english`, `chinese`, `chinesetraditional`, `japanese`, `korean`, or `spanish`. Safe to edit. |
 | `theme` | string | `"auto"` | `auto`, `light`, or `dark`. Safe to edit. |
-| `window_scale_percent` | number | `100` | Range `100..=250`. Safe to edit. |
+| `window_scale_percent` | number | `100` | Range `100..=250`. The Display slider offers `100..=200`; a stored value up to `250` still applies. Safe to edit. |
 | `tray_scale_percent` | number | `100` | Range `100..=200`. Safe to edit. |
+| `taskbar_text_scale_percent` | number | `100` | Range `100..=200`. Scales taskbar percentages and reset text. Missing values stay at `100`. Safe to edit. |
 | `powertoys_status_pipe_enabled` | boolean | `false` | Enable the local PowerToys Command Palette status pipe. Safe to edit. |
 | `float_bar_enabled` | boolean | `false` | Show the floating capacity bar. Safe to edit. |
 | `taskbar_widget_enabled` | boolean | `true` | Show the native taskbar usage readout. Safe to edit. |

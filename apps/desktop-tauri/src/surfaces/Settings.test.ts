@@ -33,4 +33,10 @@ describe("Settings navigation", () => {
     expect(settingsSource).not.toContain("setSize(");
     expect(settingsSource).not.toContain("setPosition(");
   });
+
+  it("scales the detached settings window with the shared webview zoom", () => {
+    expect(settingsSource).toContain(
+      "useWebviewWindowScale(settings.windowScalePercent)",
+    );
+  });
 });

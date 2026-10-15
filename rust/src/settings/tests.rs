@@ -231,6 +231,52 @@ fn raw_settings_clamps_tray_scale_on_load() {
 }
 
 #[test]
+fn taskbar_text_scale_defaults_to_100_percent() {
+    let settings = Settings::default();
+    assert_eq!(settings.taskbar_text_scale_percent, 100);
+}
+
+#[test]
+fn taskbar_text_scale_clamp_pins_to_supported_range() {
+    assert_eq!(clamp_taskbar_text_scale_percent(0), 100);
+    assert_eq!(clamp_taskbar_text_scale_percent(99), 100);
+    assert_eq!(clamp_taskbar_text_scale_percent(100), 100);
+    assert_eq!(clamp_taskbar_text_scale_percent(150), 150);
+    assert_eq!(clamp_taskbar_text_scale_percent(200), 200);
+    assert_eq!(clamp_taskbar_text_scale_percent(201), 200);
+}
+
+#[test]
+fn taskbar_text_scale_round_trips_and_old_files_stay_at_100() {
+    let settings = Settings {
+        taskbar_text_scale_percent: 160,
+        window_scale_percent: 250,
+        ..Settings::default()
+    };
+    let json = serde_json::to_string(&settings).expect("serialize");
+    let loaded: Settings = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(loaded.taskbar_text_scale_percent, 160);
+    assert_eq!(loaded.window_scale_percent, 250);
+
+    let legacy = r#"{
+            "enabled_providers": ["claude", "codex"],
+            "refresh_interval_secs": 300,
+            "window_scale_percent": 180
+        }"#;
+    let legacy_loaded: Settings = serde_json::from_str(legacy).expect("parse legacy settings");
+    assert_eq!(legacy_loaded.taskbar_text_scale_percent, 100);
+    assert_eq!(legacy_loaded.window_scale_percent, 180);
+
+    let out_of_range = r#"{
+            "enabled_providers": ["claude"],
+            "refresh_interval_secs": 300,
+            "taskbar_text_scale_percent": 400
+        }"#;
+    let clamped: Settings = serde_json::from_str(out_of_range).expect("parse");
+    assert_eq!(clamped.taskbar_text_scale_percent, 200);
+}
+
+#[test]
 fn float_bar_opacity_clamp_pins_to_supported_range() {
     // Below 30 → 30 so the bar isn't accidentally invisible.
     assert_eq!(clamp_float_bar_opacity(0), 30);

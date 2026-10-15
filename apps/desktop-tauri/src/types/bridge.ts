@@ -266,10 +266,12 @@ export interface SettingsSnapshot {
   agentSessionSshHosts?: string[];
   uiLanguage: Language;
   theme: ThemePreference;
-  /** 100..=250 — clamped server-side. */
+  /** 100..=250 — clamped server-side. The Display slider offers 100–200. */
   windowScalePercent: number;
   /** 100..=200 — clamped server-side. */
   trayScalePercent: number;
+  /** 100..=200 — taskbar percentage and reset text. Missing on older snapshots. */
+  taskbarTextScalePercent?: number;
   powertoysStatusPipeEnabled: boolean;
   claudeAvoidKeychainPrompts: boolean;
   codexSparkUsageVisible: boolean;
@@ -356,6 +358,7 @@ export interface SettingsUpdate {
   theme?: ThemePreference;
   windowScalePercent?: number;
   trayScalePercent?: number;
+  taskbarTextScalePercent?: number;
   powertoysStatusPipeEnabled?: boolean;
   claudeAvoidKeychainPrompts?: boolean;
   codexSparkUsageVisible?: boolean;
